@@ -1,0 +1,10 @@
+streamlit
+streamlit-folium
+folium
+geopandas
+shapely
+pandas
+numpy
+requests
+pgeocode
+python-dotenv
