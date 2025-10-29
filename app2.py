@@ -351,161 +351,235 @@ def delete_prev_finding_file(filename):
 # ---------------- UI ----------------
 st.title("Neighborhood Finder (LA-first)")
 
-tab_search, tab_findings, tab_batch, tab_dedupe, tab_export = st.tabs(
-    ["Search & ZIP List", "Findings Manager", "Batch Neighborhood", "Dedupe & Export", "Export"]
+tab_search, tab_findings, tab_batch, tab_dedupe = st.tabs(
+    ["Search & ZIP List", "Findings Manager", "Batch Neighborhood", "Dedupe & Export"]
 )
 
 # ---- Search & ZIP List (combined Single + ZIP List) ----
+# ---- Combined Search Tab (replaces previous "Single Search" + "ZIP List") ----
+
 with tab_search:
-    c1, c2 = st.columns([1,3], gap="large")
-    with c1:
-        mode = st.radio("Search by:", ["ZIP Code", "Address", "Lat/Lng"], index=0)
-        lat = lng = None
-        if mode == "ZIP Code":
-            z = st.text_input("ZIP Code (5 or ZIP+4)", value="90026")
-            if z:
-                lat, lng = latlng_from_zip(z)
-                if lat is None: st.warning("Enter a valid 5-digit ZIP or ZIP+4 (e.g., 90004-3878).")
-        elif mode == "Address":
-            addr = st.text_input("Address", placeholder="1632 Bellevue Ave, Los Angeles, CA 90026")
-            if addr:
-                lat, lng = address_to_latlng(addr)
-                if lat is None: st.info("Set GOOGLE_API_KEY to enable address geocoding.")
-        else:
-            lat = st.number_input("Latitude", value=34.0901, format="%.7f")
-            lng = st.number_input("Longitude", value=-118.2606, format="%.7f")
-        show_google_hint = st.checkbox("Show Google 'neighborhood' hint", value=True)
-        zoom = st.slider("Map zoom", 8, 18, 13)
+    # top-level choice: single vs multi
+    mode_choice = st.radio("Mode:", ["Single Lookup", "ZIP List (multi)"], index=0, horizontal=True)
 
-        st.markdown("---")
-        st.markdown("### ZIP List lookup (multi)")
-        zlist_text = st.text_area(
-            "Enter ZIPs or ZIP+4 (comma/newline separated)",
-            value="90012, 90007, 90018",
-            height=100,
-        )
-        include_google_multi = st.checkbox("Include Google hint for each ZIP (uses API quota)", value=False)
-        show_markers = st.checkbox("Show centroid markers", value=False)
-        run_multi = st.button("Lookup ZIPs", type="primary")
-
-    with c2:
-        # Map
-        m = folium.Map(location=[34.05, -118.24], zoom_start=zoom, control_scale=True, tiles="OpenStreetMap")
-        info_box = st.empty()
-
-        if lat is not None and lng is not None:
-            layer, feat = find_feature(lat, lng)
-            folium.Marker([lat, lng], tooltip="Query point").add_to(m)
-            if layer and feat is not None and feat.geometry is not None:
-                gj = folium.GeoJson(
-                    data=mapping(feat.geometry),
-                    name="Match",
-                    style_function=lambda _s: {"color": LIGHT_BLUE, "fillColor": LIGHT_BLUE,
-                                               "fillOpacity": FILL_OPACITY, "weight": BORDER_WEIGHT},
-                    tooltip=f"{'Neighborhood' if layer=='mapping_la' else ('Community' if layer=='community' else 'City')}: "
-                            f"{feat.get('name', feat.get('NAME', feat.get('COMMUNITY','Unknown')))}"
-                ); gj.add_to(m)
-                try: m.fit_bounds(gj.get_bounds(), padding=(30, 30))
-                except Exception: pass
-
-            lines = []
-            if layer == "mapping_la":
-                name = feat.get("name") or feat.get("NAME") or "Unknown Neighborhood"
-                lines.append(f"**Neighborhood (Mapping L.A.):** {name}")
-            elif layer == "community":
-                nm = feat.get("NAME") or feat.get("COMMUNITY") or feat.get("COMM_NAME") or "Unknown Community"
-                lines.append(f"**Community (County):** {nm}")
-            elif layer == "city":
-                city_name = feat.get("NAME", "Unknown City")
-                lines.append(f"**City (Census ‘place’):** {city_name}")
+    if mode_choice == "Single Lookup":
+        c1, c2 = st.columns([1, 3], gap="large")
+        with c1:
+            search_by = st.radio("Search by:", ["ZIP Code", "Address", "Lat/Lng"], index=0)
+            lat = lng = None
+            if search_by == "ZIP Code":
+                z = st.text_input("ZIP Code (5 or ZIP+4)", value="90026", key="single_zip")
+                if z:
+                    lat, lng = latlng_from_zip(z)
+                    if lat is None:
+                        st.warning("Enter a valid 5-digit ZIP or ZIP+4 (e.g., 90004-3878).")
+            elif search_by == "Address":
+                addr = st.text_input("Address", placeholder="1632 Bellevue Ave, Los Angeles, CA 90026", key="single_addr")
+                if addr:
+                    lat, lng = address_to_latlng(addr)
+                    if lat is None:
+                        st.info("Set GOOGLE_API_KEY to enable address geocoding.")
             else:
-                lines.append("**No neighborhood/city match found.**")
+                lat = st.number_input("Latitude", value=34.0901, format="%.7f", key="single_lat")
+                lng = st.number_input("Longitude", value=-118.2606, format="%.7f", key="single_lng")
 
-            if show_google_hint and GOOGLE_API_KEY:
-                g = reverse_geocode_neighborhood(lat, lng)
-                g_label = g.get("neighborhood") or g.get("sublocality") or g.get("locality")
-                lines.append(f"*Google neighborhood hint:* {g_label or '(none)'}")
+            show_google_hint = st.checkbox("Show Google 'neighborhood' hint", value=True, key="single_google_hint")
+            zoom = st.slider("Map zoom", 8, 18, 13, key="single_zoom")
 
-            (info_box.success if layer=="mapping_la" else info_box.info if layer in {"community","city"} else info_box.warning)(
-                "  \n".join(lines)
-            )
+        with c2:
+            m = folium.Map(location=[34.05, -118.24], zoom_start=zoom, control_scale=True, tiles="OpenStreetMap")
+            info_box = st.empty()
 
-        folium.LayerControl(collapsed=False).add_to(m)
-        st_folium(m, use_container_width=True)
+            if lat is not None and lng is not None:
+                layer, feat = find_feature(lat, lng)
+                folium.Marker([lat, lng], tooltip="Query point").add_to(m)
 
-        # ZIP list logic (when button clicked)
-        if run_multi:
-            zips = parse_zip_list(zlist_text)
-            if not zips:
-                st.warning("No valid ZIPs found. Add 5-digit ZIPs or ZIP+4.")
-            else:
-                with st.spinner(f"Looking up {len(zips)} ZIPs…"):
-                    rows = [lookup_zip_record(z, include_google_multi) for z in zips]
-                    df_multi = pd.DataFrame(rows)
-                st.session_state["df_multi"] = df_multi
+                if layer and feat is not None and feat.geometry is not None:
+                    gj = folium.GeoJson(
+                        data=mapping(feat.geometry),
+                        name="Match",
+                        style_function=lambda _s: {"color": LIGHT_BLUE, "fillColor": LIGHT_BLUE,
+                                                   "fillOpacity": FILL_OPACITY, "weight": BORDER_WEIGHT},
+                        tooltip=f"{'Neighborhood' if layer=='mapping_la' else ('Community' if layer=='community' else 'City')}: "
+                                f"{feat.get('name', feat.get('NAME', feat.get('COMMUNITY','Unknown')))}"
+                    ); gj.add_to(m)
+                    try: m.fit_bounds(gj.get_bounds(), padding=(30, 30))
+                    except Exception: pass
 
-        df_multi = st.session_state.get("df_multi")
-        if isinstance(df_multi, pd.DataFrame) and not df_multi.empty:
-            # Download + table
-            buf = StringIO(); df_multi.to_csv(buf, index=False)
-            st.download_button("Download ZIP results CSV",
-                               data=buf.getvalue().encode("utf-8"),
-                               file_name="zip_results.csv", mime="text/csv",
-                               key="ziplist_download_top")
-            st.dataframe(df_multi, use_container_width=True, height=260)
+                lines = []
+                if layer == "mapping_la":
+                    name = feat.get("name") or feat.get("NAME") or "Unknown Neighborhood"
+                    lines.append(f"**Neighborhood (Mapping L.A.):** {name}")
+                elif layer == "community":
+                    nm = feat.get("NAME") or feat.get("COMMUNITY") or feat.get("COMM_NAME") or "Unknown Community"
+                    lines.append(f"**Community (County):** {nm}")
+                elif layer == "city":
+                    city_name = feat.get("NAME", "Unknown City")
+                    lines.append(f"**City (Census ‘place’):** {city_name}")
+                else:
+                    lines.append("**No neighborhood/city match found.**")
 
-            # Draw polygons + optional markers
-            fg_polys = folium.FeatureGroup(name="Neighborhood polygons", show=True)
-            all_bounds = []
-            for _, r in df_multi.dropna(subset=["lat", "lng"]).iterrows():
-                layer, feat = find_feature(float(r["lat"]), float(r["lng"]))
-                if not (layer and feat is not None and feat.geometry is not None):
-                    continue
-                nm = feat.get("name", feat.get("NAME", feat.get("COMMUNITY", "Unknown")))
-                gj = folium.GeoJson(
-                    mapping(feat.geometry),
-                    name=f"{r['zip']} — {nm}",
-                    style_function=lambda _s: {"color": LIGHT_BLUE, "fillColor": LIGHT_BLUE,
-                                               "fillOpacity": FILL_OPACITY, "weight": BORDER_WEIGHT},
-                    tooltip=f"{r['zip']} — {('Neighborhood' if layer=='mapping_la' else ('Community' if layer=='community' else 'City'))}: {nm}",
+                if show_google_hint and GOOGLE_API_KEY:
+                    g = reverse_geocode_neighborhood(lat, lng)
+                    g_label = g.get("neighborhood") or g.get("sublocality") or g.get("locality")
+                    lines.append(f"*Google neighborhood hint:* {g_label or '(none)'}")
+
+                (info_box.success if layer=="mapping_la" else info_box.info if layer in {"community","city"} else info_box.warning)(
+                    "  \n".join(lines)
                 )
-                gj.add_to(fg_polys)
-                try:
-                    b = gj.get_bounds(); all_bounds.extend(b)
-                except Exception:
-                    pass
-            fg_polys.add_to(m)
 
-            if show_markers:
-                pts = df_multi[["lat","lng","zip","label_name","label_type","google_hint"]].dropna()
-                fg_pts = folium.FeatureGroup(name="ZIP markers", show=True)
-                for _, r in pts.iterrows():
-                    pop = (
-                        f"<b>ZIP {r['zip']}</b><br>"
-                        f"{(r['label_type'] or '').title()}: {r['label_name'] or ''}<br>"
-                        f"{'Google: ' + str(r['google_hint']) if pd.notna(r['google_hint']) and r['google_hint'] else ''}"
+            folium.LayerControl(collapsed=False).add_to(m)
+            st_folium(m, use_container_width=True)
+
+    else:  # ZIP List (multi)
+        c1, c2 = st.columns([1, 3], gap="large")
+        with c1:
+            zlist_text = st.text_area(
+                "Enter ZIPs or ZIP+4 (comma/newline separated)",
+                value="90012, 90007, 90018",
+                height=140,
+                key="multi_text"
+            )
+            include_google_multi = st.checkbox("Include Google hint for each ZIP (uses API quota)", value=False, key="multi_google")
+            show_markers = st.checkbox("Show centroid markers", value=False, key="multi_markers")
+            run_multi = st.button("Lookup ZIPs", type="primary", key="multi_run")
+
+        with c2:
+            m2 = folium.Map(location=[34.05, -118.24], zoom_start=11, control_scale=True, tiles="OpenStreetMap")
+
+            if run_multi:
+                zips = parse_zip_list(zlist_text)
+                if not zips:
+                    st.warning("No valid ZIPs found. Add 5-digit ZIPs or ZIP+4.")
+                else:
+                    with st.spinner(f"Looking up {len(zips)} ZIPs…"):
+                        rows = [lookup_zip_record(z, include_google_multi) for z in zips]
+                        df_multi = pd.DataFrame(rows)
+                    st.session_state["df_multi"] = df_multi
+
+            df_multi = st.session_state.get("df_multi")
+            if isinstance(df_multi, pd.DataFrame) and not df_multi.empty:
+                # Download + table
+                buf = StringIO(); df_multi.to_csv(buf, index=False)
+                st.download_button("Download ZIP results CSV",
+                                   data=buf.getvalue().encode("utf-8"),
+                                   file_name="zip_results.csv", mime="text/csv",
+                                   key="ziplist_download_combined")
+                st.dataframe(df_multi, use_container_width=True, height=260)
+
+                # Draw polygons
+                fg_polys = folium.FeatureGroup(name="Neighborhood polygons", show=True)
+                all_bounds = []
+                for _, r in df_multi.dropna(subset=["lat", "lng"]).iterrows():
+                    layer, feat = find_feature(float(r["lat"]), float(r["lng"]))
+                    if not (layer and feat is not None and feat.geometry is not None):
+                        continue
+                    nm = feat.get("name", feat.get("NAME", feat.get("COMMUNITY", "Unknown")))
+                    gj = folium.GeoJson(
+                        mapping(feat.geometry),
+                        name=f"{r['zip']} — {nm}",
+                        style_function=lambda _s: {"color": LIGHT_BLUE, "fillColor": LIGHT_BLUE,
+                                                   "fillOpacity": FILL_OPACITY, "weight": BORDER_WEIGHT},
+                        tooltip=f"{r['zip']} — {('Neighborhood' if layer=='mapping_la' else ('Community' if layer=='community' else 'City'))}: {nm}",
                     )
-                    folium.CircleMarker([r["lat"], r["lng"]], radius=5, tooltip=pop, popup=pop).add_to(fg_pts)
-                fg_pts.add_to(m)
+                    gj.add_to(fg_polys)
+                    try:
+                        b = gj.get_bounds(); all_bounds.extend(b)
+                    except Exception:
+                        pass
+                fg_polys.add_to(m2)
 
-            # Focus ZIP
-            options = list(df_multi["zip"].astype(str))
-            focus_zip = st.selectbox("Focus ZIP (emphasize outline):", options, index=0)
-            f_lat, f_lng = latlng_from_zip(focus_zip)
-            if f_lat is not None:
-                layer_f, feat_f = find_feature(f_lat, f_lng)
-                if layer_f and feat_f is not None and feat_f.geometry is not None:
-                    nm_f = feat_f.get("name", feat_f.get("NAME", feat_f.get("COMMUNITY", "Unknown")))
-                    folium.GeoJson(
-                        mapping(feat_f.geometry),
-                        name=f"Selected {focus_zip}",
-                        style_function=lambda _s: {"color": "#111", "fillOpacity": 0, "weight": 4},
-                        tooltip=f"{('Neighborhood' if layer_f=='mapping_la' else ('Community' if layer_f=='community' else 'City'))}: {nm_f}",
-                    ).add_to(m)
+                # Optional centroid markers
+                if show_markers:
+                    pts = df_multi[["lat","lng","zip","label_name","label_type","google_hint"]].dropna()
+                    fg_pts = folium.FeatureGroup(name="ZIP markers", show=True)
+                    for _, r in pts.iterrows():
+                        pop = (
+                            f"<b>ZIP {r['zip']}</b><br>"
+                            f"{(r['label_type'] or '').title()}: {r['label_name'] or ''}<br>"
+                            f"{'Google: ' + str(r['google_hint']) if pd.notna(r['google_hint']) and r['google_hint'] else ''}"
+                        )
+                        folium.CircleMarker([r["lat"], r["lng"]], radius=5, tooltip=pop, popup=pop).add_to(fg_pts)
+                    fg_pts.add_to(m2)
 
-            if all_bounds:
-                try: m.fit_bounds(all_bounds, padding=(20, 20))
-                except Exception: pass
+                # Focus ZIP (emphasize outline)
+                options = list(df_multi["zip"].astype(str))
+                focus_zip = st.selectbox("Focus ZIP (emphasize outline):", options, index=0, key="focus_zip_combined")
+                f_lat, f_lng = latlng_from_zip(focus_zip)
+                if f_lat is not None:
+                    layer_f, feat_f = find_feature(f_lat, f_lng)
+                    if layer_f and feat_f is not None and feat_f.geometry is not None:
+                        nm_f = feat_f.get("name", feat_f.get("NAME", feat_f.get("COMMUNITY", "Unknown")))
+                        folium.GeoJson(
+                            mapping(feat_f.geometry),
+                            name=f"Selected {focus_zip}",
+                            style_function=lambda _s: {"color": "#111", "fillOpacity": 0, "weight": 4},
+                            tooltip=f"{('Neighborhood' if layer_f=='mapping_la' else ('Community' if layer_f=='community' else 'City'))}: {nm_f}",
+                        ).add_to(m2)
+
+                if all_bounds:
+                    try: m2.fit_bounds(all_bounds, padding=(20, 20))
+                    except Exception: pass
+
+            folium.LayerControl(collapsed=False).add_to(m2)
+            st_folium(m2, use_container_width=True)
+
+        # CSV upload + enrichment (same behavior as previous ZIP List)
+        st.markdown("### 📂 Upload CSV for ZIP + ZIP4 Lookup")
+        uploaded_csv = st.file_uploader("Upload CSV with 'contact_zip_code' and optional 'contact_zip4_code' columns", type=["csv"], key="multi_upload")
+
+        if uploaded_csv is not None:
+            df_in = pd.read_csv(uploaded_csv, dtype=str)
+
+            if "contact_zip_code" not in df_in.columns:
+                st.error("CSV must have a column named 'contact_zip_code'.")
+            else:
+                rows_out = []
+                for _, row in df_in.iterrows():
+                    z = str(row["contact_zip_code"]).strip()
+
+                    if "contact_zip4_code" in df_in.columns and pd.notna(row["contact_zip4_code"]):
+                        z_full = f"{z[:5]}-{str(row['contact_zip4_code']).zfill(4)}"
+                    else:
+                        z_full = z
+
+                    lat, lng = latlng_from_zip(z_full)
+                    layer, feat = find_feature(lat, lng) if lat is not None else (None, None)
+
+                    neighborhood = None
+                    source = None
+                    if layer and feat is not None:
+                        if layer == "mapping_la":
+                            neighborhood = feat.get("name") or feat.get("NAME")
+                            source = "mapping_la"
+                        elif layer == "community":
+                            neighborhood = feat.get("NAME") or feat.get("COMMUNITY") or feat.get("COMM_NAME")
+                            source = "community"
+                        elif layer == "city":
+                            neighborhood = feat.get("NAME")
+                            source = "city"
+                    else:
+                        g = reverse_geocode_neighborhood(lat, lng) if (lat and lng) else {}
+                        neighborhood = g.get("neighborhood") or g.get("sublocality") or g.get("locality")
+                        source = "google_hint" if neighborhood else None
+
+                    rows_out.append({
+                        **row.to_dict(),
+                        "neighborhood_suggested": neighborhood,
+                        "source": source
+                    })
+
+                df_out = pd.DataFrame(rows_out)
+
+                st.dataframe(df_out, use_container_width=True, height=300)
+
+                out_buf = StringIO(); df_out.to_csv(out_buf, index=False)
+                st.download_button("⬇️ Download Enriched CSV",
+                                   data=out_buf.getvalue().encode("utf-8"),
+                                   file_name="neighborhood_enriched.csv",
+                                   mime="text/csv",
+                                   key="multi_enriched_download")
+
 
 # ---- Findings Manager ----
 with tab_findings:
@@ -565,134 +639,251 @@ with tab_findings:
         st.dataframe(df_comb.head(200))
 
 # ---- Batch Neighborhood (core multi-row processing) ----
+# ---- Batch tab (with progress bar + reload/reset without full-page refresh) ----
+from datetime import datetime
+import json, time
+
 with tab_batch:
     st.header("Batch Neighborhood Matching")
 
+    # paths for persistence
+    DATA_DIR.mkdir(exist_ok=True)
+    full_path = DATA_DIR / "batch_full_results.csv"
+    unmatched_path = DATA_DIR / "batch_unmatched_results.csv"
+    meta_path = DATA_DIR / "batch_meta.json"
+
+    # ensure session_state keys exist (won't be cleared on download)
+    if "batch_full" not in st.session_state:
+        st.session_state["batch_full"] = None
+    if "batch_unmatched" not in st.session_state:
+        st.session_state["batch_unmatched"] = None
+    if "batch_meta" not in st.session_state:
+        st.session_state["batch_meta"] = {}
+
+    # try to lazy-load persisted files once (keeps them until manual refresh or explicit reload)
+    if st.session_state["batch_full"] is None and full_path.exists():
+        try:
+            st.session_state["batch_full"] = pd.read_csv(full_path, dtype=str).fillna("")
+        except Exception:
+            st.warning("Could not load persisted full results from disk (will proceed without).")
+
+    if st.session_state["batch_unmatched"] is None and unmatched_path.exists():
+        try:
+            st.session_state["batch_unmatched"] = pd.read_csv(unmatched_path, dtype=str).fillna("")
+        except Exception:
+            st.warning("Could not load persisted unmatched results from disk (will proceed without).")
+
+    if not st.session_state["batch_meta"] and meta_path.exists():
+        try:
+            st.session_state["batch_meta"] = json.loads(meta_path.read_text())
+        except Exception:
+            st.session_state["batch_meta"] = {}
+
+    # UI controls
     uploaded_file = st.file_uploader("Upload CSV for neighborhood enrichment", type=["csv"])
-    run_batch = st.button("Run Batch Neighborhood Matching", type="primary")
+    run_batch = st.button("Run Batch Neighborhood Matching", type="primary", key="run_batch")
+    clear_persist = st.button("Reset", key="clear_persist")
 
-    if run_batch and uploaded_file:
-        with st.spinner("Processing batch neighborhood matching..."):
-            df = pd.read_csv(uploaded_file, dtype=str).fillna("")
-            prev = load_all_prev_findings()
+    # clear persisted (explicit)
+    if clear_persist:
+        for k in ["batch_full", "batch_unmatched", "batch_meta"]:
+            if k in st.session_state:
+                st.session_state.pop(k)
+        for p in (full_path, unmatched_path, meta_path):
+            try:
+                if p.exists(): p.unlink()
+            except Exception:
+                pass
+        st.success("Session resetted")
 
-            # --- STEP 1: Match by ZIP + ZIP4 using previous findings ---
-            df["neighborhood"] = None
-            for i, row in df.iterrows():
-                z5 = str(row.get("contact_zip_code", "")).strip()[:5]
-                z4 = str(row.get("contact_zip4_code", "")).strip()
-                match = prev[
-                    (prev["contact_zip_code"] == z5) &
-                    (prev["contact_zip4_code"] == z4)
-                ]
-                if not match.empty:
-                    df.at[i, "neighborhood"] = match.iloc[0]["recommended"]
+    
 
-            # --- STEP 2: Fill missing neighborhoods via LA Times ---
-            for i, row in df[df["neighborhood"].isna()].iterrows():
-                z5 = normalize_zip_any(row.get("contact_zip_code"))
-                lat, lng = latlng_from_zip(z5)
-                if lat and lng:
-                    layer, feat = find_feature(lat, lng)
-                    if layer == "mapping_la":
-                        df.at[i, "neighborhood"] = feat.get("name") or feat.get("NAME")
+    # show any persisted run info
+    if st.session_state.get("batch_full") is not None or st.session_state.get("batch_unmatched") is not None:
+        meta = st.session_state.get("batch_meta", {})
+        st.markdown("### ✅ Persisted results (loaded into session)")
+        if meta.get("timestamp"):
+            st.write(f"**Last run:** {meta.get('timestamp')}  —  **Duration:** {meta.get('duration_s', 0):.2f}s")
+        if st.session_state.get("batch_full") is not None:
+            st.markdown("**Full results preview**")
+            st.dataframe(st.session_state["batch_full"].head(20), use_container_width=True)
+            buf = StringIO(); st.session_state["batch_full"].to_csv(buf, index=False)
+            st.download_button("Download persisted full results CSV",
+                               data=buf.getvalue().encode("utf-8"),
+                               file_name="neighborhoods_full_no_recommendation.csv",
+                               mime="text/csv",
+                               key="download_persisted_full")
+        if st.session_state.get("batch_unmatched") is not None:
+            st.markdown("**Unmatched rows preview**")
+            st.dataframe(st.session_state["batch_unmatched"].head(50), use_container_width=True)
+            buf2 = StringIO(); st.session_state["batch_unmatched"].to_csv(buf2, index=False)
+            st.download_button("Download persisted unmatched CSV",
+                               data=buf2.getvalue().encode("utf-8"),
+                               file_name="unmatched_after_matching.csv",
+                               mime="text/csv",
+                               key="download_persisted_unmatched")
 
-            # --- STEP 3: For remaining nulls, use Google/TIGER fallback ---
-            df["neighborhood_recommended"] = None
-            for i, row in df[df["neighborhood"].isna()].iterrows():
-                z5 = normalize_zip_any(row.get("contact_zip_code"))
-                lat, lng = latlng_from_zip(z5)
-                if lat and lng:
-                    rec = {}
-                    if GOOGLE_API_KEY:
-                        rec = reverse_geocode_neighborhood(lat, lng)
-                    else:
-                        # fallback to TIGER Census (use la_cities for simplicity)
-                        pt = gpd.GeoDataFrame(index=[0], geometry=[Point(lng, lat)], crs=4326)
-                        hit_city = gpd.sjoin(pt, la_cities, how="left", predicate="within")
-                        if hit_city.index_right.notna().any():
-                            rec["locality"] = la_cities.iloc[int(hit_city.index_right.dropna().iloc[0])]["NAME"]
+    # --- Run the batch when requested ---
+    if run_batch:
+        if not uploaded_file:
+            st.warning("Please upload a CSV before running the batch.")
+        else:
+            start_time = time.perf_counter()
+            with st.spinner("Processing batch neighborhood matching..."):
+                df = pd.read_csv(uploaded_file, dtype=str).fillna("")
+                prev = load_all_prev_findings()
 
-                    df.at[i, "neighborhood_recommended"] = (
-                        rec.get("neighborhood") or rec.get("sublocality") or rec.get("locality")
-                    )
+                # Prepare progress UI
+                total_steps = 3  # step1, step2, step3 loops
+                prog_container = st.container()
+                prog = prog_container.progress(0.0)
+                status_text = prog_container.empty()
 
-            # --- STEP 4: If neighborhood_recommended == contact_city ---
-            for i, row in df.iterrows():
-                nrec = row.get("neighborhood_recommended", "")
-                ccity = row.get("contact_city", "")
-                if not pd.isna(nrec) and str(nrec).strip().lower() == str(ccity).strip().lower():
-                    df.at[i, "neighborhood"] = nrec
+                # --- STEP 1: Match by ZIP + ZIP4 using previous findings ---
+                status_text.info("Step 1/3 — Matching by ZIP/ZIP4 against previous findings...")
+                rows = len(df)
+                if rows == 0:
+                    prog.progress(1.0)
+                else:
+                    df["neighborhood"] = None
+                    for i, row in enumerate(df.itertuples(index=False), start=1):
+                        # access via row.__getattribute__ or index-based; keep using original approach for clarity
+                        z5 = str(df.at[i-1, "contact_zip_code"] if "contact_zip_code" in df.columns else "").strip()[:5]
+                        z4 = str(df.at[i-1, "contact_zip4_code"] if "contact_zip4_code" in df.columns else "").strip()
+                        match = prev[
+                            (prev["contact_zip_code"] == z5) &
+                            (prev["contact_zip4_code"] == z4)
+                        ]
+                        if not match.empty:
+                            df.at[i-1, "neighborhood"] = match.iloc[0]["recommended"]
+                        # update progress fraction for step1 (0..0.33)
+                        prog.progress((i/rows) * (1/total_steps))
 
-            # --- STEP 5: Export rows still unmatched but with neighborhood_recommended ---
-                        # --- STEP 5: Finalize outputs per your request ---
-            # Define a robust "null neighborhood" mask (covers None/NaN and empty-string)
-            def is_neighborhood_null(val):
-                return pd.isna(val) or str(val).strip() == ""
+                # --- STEP 2: Fill missing neighborhoods via LA Times ---
+                missing_idx = df[df["neighborhood"].isna()].index.tolist()
+                status_text.info("Step 2/3 — Filling missing neighborhoods via Mapping L.A. polygons...")
+                mcount = len(missing_idx)
+                if mcount == 0:
+                    prog.progress(2/3)
+                else:
+                    for j, i in enumerate(missing_idx, start=1):
+                        z5 = normalize_zip_any(df.at[i, "contact_zip_code"])
+                        lat, lng = latlng_from_zip(z5)
+                        if lat and lng:
+                            layer, feat = find_feature(lat, lng)
+                            if layer == "mapping_la":
+                                df.at[i, "neighborhood"] = feat.get("name") or feat.get("NAME")
+                        prog.progress((1/total_steps) + (j/mcount) * (1/total_steps))
 
-            null_mask = df["neighborhood"].apply(is_neighborhood_null)
-
-            # Full results for web (remove neighborhood_recommended column if present)
-            if "neighborhood_recommended" in df.columns:
-                df_full_display = df.drop(columns=["neighborhood_recommended"]).copy()
-            else:
-                df_full_display = df.copy()
-            df_full_display = df_full_display[~df_full_display["neighborhood"].isna() & (df_full_display["neighborhood"].str.strip() != "")]
-
-            # Show summary + preview for full results (without neighborhood_recommended)
-            st.write("✅ Neighborhood matching completed.")
-            st.markdown("### Full results (without `neighborhood_recommended`) — preview")
-            st.dataframe(df_full_display.head(20), use_container_width=True)
-
-            # Prepare download for full results (no neighborhood_recommended)
-            buf_full = StringIO()
-            df_full_display.to_csv(buf_full, index=False)
-            st.download_button(
-                "Download full results (no neighborhood_recommended)",
-                data=buf_full.getvalue().encode("utf-8"),
-                file_name="neighborhoods_full_no_recommendation.csv",
-                mime="text/csv"
-            )
-
-            # Now prepare the second CSV: rows still unmatched (neighborhood null after all processing)
-            # with the requested columns: contact_zip_code, contact_zip4_code, neighborhood, neighborhood_recommended
-            # Ensure neighborhood_recommended column exists (create empty if not)
-            if "neighborhood_recommended" not in df.columns:
+                # --- STEP 3: For remaining nulls, use Google/TIGER fallback ---
+                missing_idx2 = df[df["neighborhood"].isna()].index.tolist()
+                status_text.info("Step 3/3 — Google/TIGER fallback for remaining rows...")
+                m2 = len(missing_idx2)
                 df["neighborhood_recommended"] = None
+                if m2 == 0:
+                    prog.progress(1.0)
+                else:
+                    for k, i in enumerate(missing_idx2, start=1):
+                        z5 = normalize_zip_any(df.at[i, "contact_zip_code"])
+                        lat, lng = latlng_from_zip(z5)
+                        if lat and lng:
+                            rec = {}
+                            if GOOGLE_API_KEY:
+                                rec = reverse_geocode_neighborhood(lat, lng)
+                            else:
+                                pt = gpd.GeoDataFrame(index=[0], geometry=[Point(lng, lat)], crs=4326)
+                                hit_city = gpd.sjoin(pt, la_cities, how="left", predicate="within")
+                                if hit_city.index_right.notna().any():
+                                    rec["locality"] = la_cities.iloc[int(hit_city.index_right.dropna().iloc[0])]["NAME"]
+                            df.at[i, "neighborhood_recommended"] = (
+                                rec.get("neighborhood") or rec.get("sublocality") or rec.get("locality")
+                            )
+                        prog.progress((2/total_steps) + (k/m2) * (1/total_steps))
 
-            unmatched_after_all = df[null_mask].copy()
-            cols_needed = ["contact_zip_code", "contact_zip4_code", "neighborhood", "neighborhood_recommended"]
-            # Some inputs might lack zip4 column — ensure columns exist
-            for c in cols_needed:
-                if c not in unmatched_after_all.columns:
-                    unmatched_after_all[c] = None
+                # --- Post-processing (STEP 4 etc) ---
+                status_text.info("Finalizing results...")
+                for i, row in df.iterrows():
+                    nrec = row.get("neighborhood_recommended", "")
+                    ccity = row.get("contact_city", "")
+                    if not pd.isna(nrec) and str(nrec).strip().lower() == str(ccity).strip().lower():
+                        df.at[i, "neighborhood"] = nrec
 
-            unmatched_export = unmatched_after_all[cols_needed].reset_index(drop=True)
+                # finalize masks / outputs
+                def is_neighborhood_null(val):
+                    return pd.isna(val) or str(val).strip() == ""
 
-            if not unmatched_export.empty:
-                out_path = DATA_DIR / "unmatched_after_matching.csv"
-                unmatched_export.to_csv(out_path, index=False)
-                st.success(f"Saved {len(unmatched_export)} unmatched rows to `{out_path.name}`.")
-                st.markdown("### Unmatched rows (neighborhood still null) — preview")
-                st.dataframe(unmatched_export.head(50), use_container_width=True)
+                null_mask = df["neighborhood"].apply(is_neighborhood_null)
+                if "neighborhood_recommended" in df.columns:
+                    df_full_display = df.drop(columns=["neighborhood_recommended"]).copy()
+                else:
+                    df_full_display = df.copy()
+                df_full_display = df_full_display[~df_full_display["neighborhood"].isna() & (df_full_display["neighborhood"].str.strip() != "")]
 
-                buf_un = StringIO()
-                unmatched_export.to_csv(buf_un, index=False)
+                if "neighborhood_recommended" not in df.columns:
+                    df["neighborhood_recommended"] = None
+
+                unmatched_after_all = df[null_mask].copy()
+                cols_needed = ["contact_zip_code", "contact_zip4_code", "neighborhood", "neighborhood_recommended"]
+                for c in cols_needed:
+                    if c not in unmatched_after_all.columns:
+                        unmatched_after_all[c] = None
+                unmatched_export = unmatched_after_all[cols_needed].reset_index(drop=True)
+
+                # persist to session_state and disk (so they remain until manual refresh / explicit clear)
+                st.session_state["batch_full"] = df_full_display.fillna("").astype(str)
+                st.session_state["batch_unmatched"] = unmatched_export.fillna("").astype(str)
+
+                try:
+                    st.session_state["batch_full"].to_csv(full_path, index=False)
+                    st.session_state["batch_unmatched"].to_csv(unmatched_path, index=False)
+                except Exception as e:
+                    st.warning(f"Could not persist CSVs to disk: {e}")
+
+                duration = time.perf_counter() - start_time
+                meta = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "duration_s": duration, "rows_input": len(df)}
+                st.session_state["batch_meta"] = meta
+                try:
+                    meta_path.write_text(json.dumps(meta))
+                except Exception:
+                    pass
+
+                # finalize progress UI and show results
+                prog.progress(1.0)
+                status_text.success("Batch processing complete.")
+
+                st.success("✅ Neighborhood matching completed.")
+                st.markdown(f"**Run time:** {duration:.2f} seconds — **Rows processed:** {len(df)}")
+                st.markdown("### Full results (without `neighborhood_recommended`) — preview")
+                st.dataframe(st.session_state["batch_full"].head(20), use_container_width=True)
+
+                # Download buttons (do not clear session_state)
+                buf_full = StringIO()
+                st.session_state["batch_full"].to_csv(buf_full, index=False)
                 st.download_button(
-                    "Download unmatched rows (neighborhood still null)",
-                    data=buf_un.getvalue().encode("utf-8"),
-                    file_name="unmatched_after_matching.csv",
-                    mime="text/csv"
+                    "Download full results (no neighborhood_recommended)",
+                    data=buf_full.getvalue().encode("utf-8"),
+                    file_name="neighborhoods_full_no_recommendation.csv",
+                    mime="text/csv",
+                    key="download_full_now"
                 )
-            else:
-                st.info("No rows remain unmatched (neighborhood null) after processing.")
 
+                if not st.session_state["batch_unmatched"].empty:
+                    st.success(f"Saved {len(st.session_state['batch_unmatched'])} unmatched rows (persisted).")
+                    st.markdown("### Unmatched rows (neighborhood still null) — preview")
+                    st.dataframe(st.session_state["batch_unmatched"].head(50), use_container_width=True)
 
-            # --- Summary ---
-            st.write("✅ Neighborhood matching completed.")
-            st.write(df.head(20))
-            csv_buf = StringIO(); df.to_csv(csv_buf, index=False)
-            st.download_button("Download Full Results", csv_buf.getvalue().encode("utf-8"), "neighborhood_matched.csv")
+                    buf_un = StringIO()
+                    st.session_state["batch_unmatched"].to_csv(buf_un, index=False)
+                    st.download_button(
+                        "Download unmatched rows (neighborhood still null)",
+                        data=buf_un.getvalue().encode("utf-8"),
+                        file_name="unmatched_after_matching.csv",
+                        mime="text/csv",
+                        key="download_unmatched_now"
+                    )
+                else:
+                    st.info("No rows remain unmatched (neighborhood null) after processing.")
+
 
 
 
