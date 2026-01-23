@@ -621,16 +621,14 @@ with tab_findings:
                 st.session_state["to_delete"] = f
         if st.session_state.get("to_delete"):
             target = st.session_state["to_delete"]
-            st.warning(f"You asked to delete **{target}**. This is permanent.")
-            if st.button("Confirm deletion", key="confirm_del_btn"):
-                try:
-                    delete_prev_finding_file(target)
-                    st.success(f"Deleted {target}")
-                    st.session_state["to_delete"] = None
+            try:
+                delete_prev_finding_file(target)
+                st.success(f"Deleted {target}")
+                st.session_state["to_delete"] = None
                     # refresh files
-                    files = list_prev_finding_files()
-                except Exception as e:
-                    st.error(f"Delete failed: {e}")
+                files = list_prev_finding_files()
+            except Exception as e:
+                st.error(f"Delete failed: {e}")
 
     # allow quick load/inspect of all combined findings
     if st.button("Load & preview combined findings (first 200 rows)"):
