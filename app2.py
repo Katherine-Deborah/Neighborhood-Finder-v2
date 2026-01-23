@@ -323,7 +323,7 @@ def load_all_prev_findings() -> pd.DataFrame:
     dfs = []
     for f in files:
         try:
-            df = pd.read_csv(PREV_FINDINGS_DIR / f, dtype=str)
+            df = pd.read_csv(PREV_FINDINGS_DIR / f, dtype=str).fillna("")
             # normalize column names lowercase for safety
             df.columns = [c.strip() for c in df.columns]
             dfs.append(df)
@@ -529,7 +529,7 @@ with tab_search:
         uploaded_csv = st.file_uploader("Upload CSV with 'contact_zip_code' and optional 'contact_zip4_code' columns", type=["csv"], key="multi_upload")
 
         if uploaded_csv is not None:
-            df_in = pd.read_csv(uploaded_csv, dtype=str)
+            df_in = pd.read_csv(uploaded_csv, dtype=str).fillna("")
 
             if "contact_zip_code" not in df_in.columns:
                 st.error("CSV must have a column named 'contact_zip_code'.")
@@ -612,7 +612,7 @@ with tab_findings:
             cols[0].write(f)
             if cols[1].button("Preview", key=f"prev_{f}"):
                 try:
-                    dfp = pd.read_csv(PREV_FINDINGS_DIR / f, dtype=str).head(50)
+                    dfp = pd.read_csv(PREV_FINDINGS_DIR / f, dtype=str).fillna("").head(50)
                     st.dataframe(dfp)
                 except Exception as e:
                     st.error(f"Unable to preview {f}: {e}")
