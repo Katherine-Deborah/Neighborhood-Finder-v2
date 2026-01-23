@@ -815,7 +815,7 @@ with tab_batch:
                     df_full_display = df.drop(columns=["neighborhood_recommended"]).copy()
                 else:
                     df_full_display = df.copy()
-                df_full_display = df_full_display[~df_full_display["neighborhood"].isna() & (df_full_display["neighborhood"].str.strip() != "")]
+                #df_full_display = df_full_display[~df_full_display["neighborhood"].isna() & (df_full_display["neighborhood"].str.strip() != "")]
 
                 if "neighborhood_recommended" not in df.columns:
                     df["neighborhood_recommended"] = None
