@@ -823,7 +823,7 @@ with tab_batch:
                     df["neighborhood_recommended"] = None
 
                 unmatched_after_all = df[null_mask].copy()
-                cols_needed = ["contact_zip_code", "contact_zip4_code", "neighborhood", "neighborhood_recommended"]
+                cols_needed = ["contact_zip_code", "contact_zip4_code", "contact_city", "neighborhood", "neighborhood_recommended"]
                 for c in cols_needed:
                     if c not in unmatched_after_all.columns:
                         unmatched_after_all[c] = None
